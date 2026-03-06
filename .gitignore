@@ -1,0 +1,38 @@
+# --- Nuxt Project (dashboard folder) ---
+dashboard/.output
+dashboard/.data
+dashboard/.nuxt
+dashboard/.nitro
+dashboard/.cache
+dashboard/dist
+dashboard/node_modules
+
+# --- Python Worker (worker folder) ---
+worker/venv/
+worker/__pycache__/
+worker/*.pyc
+worker/.pytest_cache/
+worker/data/
+
+# --- Database & Docker ---
+# Exclude the actual database data stored by Docker
+pgdata/
+
+# --- Logs ---
+logs
+*.log
+dashboard/*.log
+
+# --- System & IDEs ---
+.DS_Store
+.fleet
+.idea
+.vscode/
+*.swp
+
+# --- Environment Secrets ---
+.env
+.env.*
+!.env.example
+dashboard/.env
+worker/.env
