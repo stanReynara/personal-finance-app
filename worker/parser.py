@@ -84,14 +84,22 @@ with pdfplumber.open(pdf_path) as pdf:
                   key = parts[0].strip()
                   val = parts[1].strip()
                   
-                  if 'SALDO AWAL' in key: footer_summary['Saldo Awal'] = val
-                  elif 'MUTASI CR' in key: footer_summary['Mutasi CR'] = val
-                  elif 'MUTASI DB' in key: footer_summary['Mutasi DB'] = val
-                  elif 'SALDO AKHIR' in key: footer_summary['Saldo Akhir'] = val
+                  if 'SALDO AWAL' in key:
+                    footer_summary['Saldo Awal'] = val
+                  elif 'MUTASI CR' in key:
+                    footer_summary['Mutasi CR'] = val.split()[0]
+                    footer_summary['Mutasi CR Amount'] = val.split()[1]
+                  elif 'MUTASI DB' in key:
+                    footer_summary['Mutasi DB'] = val.split()[0]
+                    footer_summary['Mutasi DB Amount'] = val.split()[1]
+                  elif 'SALDO AKHIR' in key:
+                    footer_summary['Saldo Akhir'] = val
 
       # --- PRINT RESULTS ---
       for txn in cleaned_transactions:
           print(txn)
-          
-      for key, value in footer_summary.items():
-          print(f"{key}: {value}")
+        
+      if len(footer_summary) > 0: 
+        print(footer_summary)
+      # for key, value in footer_summary.items():
+      #     print(f"{key}: {value}")
