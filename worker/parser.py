@@ -1,21 +1,42 @@
 import pdfplumber
 
-# Make sure this matches your actual file name
 pdf_path = "statements/jan.pdf" 
 
 with pdfplumber.open(pdf_path) as pdf:
     for page in pdf.pages:
-      # Crop the page to remove the account info at the top and the footer
-      bounding_box = (0, 230, page.width, page.height-50)
-      cropped_page = page.within_bbox(bounding_box)
+    
+      # --- 1. FIND THE FOOTER SPLIT LINE ---
+      words = page.extract_words()
+      footer_y0 = page.height - 50 # Default to near the bottom margin
+      
+      # Scan the page to find where "SALDO AWAL" appears
+      saldo_awal_tops = []
+      for i in range(len(words)-1):
+          if words[i]['text'].upper() == 'SALDO' and words[i+1]['text'].upper() == 'AWAL':
+              saldo_awal_tops.append(words[i]['top'])
+              
+      if saldo_awal_tops:
+          # We only care about the very last occurrence on the page
+          last_y = saldo_awal_tops[-1]
+          
+          # Verify it's in the bottom half of the page so we don't accidentally 
+          # cut off the first transaction of the month
+          if last_y > page.height / 2:
+              footer_y0 = last_y - 5 # Subtract 5 points to give the crop a clean padding line
+              
+      # --- 2. CROP THE PAGE INTO TWO PIECES ---
+      # Crop 1: The Table (stops right before the footer begins)
+      table_bbox = (0, 230, page.width, footer_y0)
+      table_page = page.within_bbox(table_bbox)
+      
+      # Crop 2: The Footer (starts where the table ends)
+      footer_bbox = (0, footer_y0, page.width, page.height - 10)
+      footer_page = page.within_bbox(footer_bbox)
 
-      # Your dialed-in coordinates
+      # --- 3. EXTRACT TABLE (Top Half) ---
       perfect_lines = [32, 87, 298, 337, 455, 570] 
-      page_start = 0
-      page_end = page.width
-      explicit_lines = sorted(list(set([page_start, page_end] + perfect_lines)))
+      explicit_lines = sorted(list(set([0, page.width] + perfect_lines)))
 
-      # Apply the perfectly aligned lines to your table settings
       table_settings = {
           "vertical_strategy": "explicit",
           "explicit_vertical_lines": explicit_lines, 
@@ -23,69 +44,54 @@ with pdfplumber.open(pdf_path) as pdf:
           "snap_tolerance": 3,
       }
 
-      # Extract the table data using your explicit lines
-      extracted_table = cropped_page.extract_table(table_settings)
-
+      extracted_table = table_page.extract_table(table_settings)
+      cleaned_transactions = []
+      
       if extracted_table:
-          # We will store our fully merged dictionary objects here
-          cleaned_transactions = []
-          
-          # This will hold the transaction we are currently building
           current_txn = None
-
-          # Skip the header row [0] and loop through the data
           for row in extracted_table[1:]:
-              
               clean_row = [cell.strip() if cell else '' for cell in row]
-              
               if not any(clean_row):
                   continue
                   
-              tanggal = clean_row[0]
-              keterangan = clean_row[1]
-              cbg = clean_row[2]
-              mutasi = clean_row[3]
-              saldo = clean_row[4]
+              tanggal, keterangan, cbg, mutasi, saldo = clean_row[:5]
 
-              # --- NEW STOP CONDITION ---
-              # If we see "SALDO AWAL" on a row with NO date, we have hit the footer.
-              # End the scan immediately.
-              if tanggal == '' and 'SALDO AWAL' in keterangan.upper():
-                  break 
-
-              # If 'tanggal' has data, it is a brand new transaction
+              # Buffer logic to handle multi-line descriptions
               if tanggal != '':
-                  if current_txn is not None:
+                  if current_txn is not None: 
                       cleaned_transactions.append(current_txn)
-                  
-                  current_txn = {
-                      'tanggal': tanggal,
-                      'keterangan': keterangan,
-                      'cbg': cbg,
-                      'mutasi': mutasi,
-                      'saldo': saldo
-                  }
-              
-              # If 'tanggal' is empty, append to the previous transaction
+                  current_txn = {'tanggal': tanggal, 'keterangan': keterangan, 'cbg': cbg, 'mutasi': mutasi, 'saldo': saldo}
               else:
                   if current_txn is not None:
-                      if keterangan != '':
-                          current_txn['keterangan'] += f" {keterangan}"
-                      if mutasi != '':
-                          current_txn['mutasi'] += f" {mutasi}"
-                      if saldo != '':
-                          current_txn['saldo'] += f" {saldo}"
+                      if keterangan: current_txn['keterangan'] += f" {keterangan}"
+                      if mutasi: current_txn['mutasi'] += f" {mutasi}"
+                      if saldo: current_txn['saldo'] += f" {saldo}"
 
-          # Append the very last transaction (the one right before the footer)
-          if current_txn is not None:
-              cleaned_transactions.append(current_txn)
-          # CRITICAL: After the loop finishes, append the very last transaction in the buffer
-          if current_txn is not None:
+          # Append the final transaction (which is now guaranteed to not contain footer garbage)
+          if current_txn is not None: 
               cleaned_transactions.append(current_txn)
 
-          # --- Print the merged results ---
-          for txn in cleaned_transactions:
-              print(txn)
+      # --- 4. EXTRACT FOOTER TEXT (Bottom Half) ---
+      footer_text = footer_page.extract_text()
+      footer_summary = {}
+      
+      if footer_text:
+          # Since we are using pure text extraction, we can just split by the colon
+          for line in footer_text.split('\n'):
+              line = line.strip().upper()
+              if ':' in line:
+                  parts = line.split(':', 1)
+                  key = parts[0].strip()
+                  val = parts[1].strip()
+                  
+                  if 'SALDO AWAL' in key: footer_summary['Saldo Awal'] = val
+                  elif 'MUTASI CR' in key: footer_summary['Mutasi CR'] = val
+                  elif 'MUTASI DB' in key: footer_summary['Mutasi DB'] = val
+                  elif 'SALDO AKHIR' in key: footer_summary['Saldo Akhir'] = val
 
-      else:
-          print("No table data could be extracted.")
+      # --- PRINT RESULTS ---
+      for txn in cleaned_transactions:
+          print(txn)
+          
+      for key, value in footer_summary.items():
+          print(f"{key}: {value}")
